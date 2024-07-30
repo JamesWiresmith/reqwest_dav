@@ -32,7 +32,9 @@ impl Client {
                     None => return Err(Error::MissingAuthContext),
                     Some(state) => {
                         let response = state.respond(&context)?;
-                        builder = builder.header("Authorization", response.to_header_string());
+                        let response_header = response.to_header_string();
+                        let response_header = response_header.replace("algorithm=MD5", "algorithm=\"MD5\"");
+                        builder = builder.header("Authorization", response_header);
                     }
                 }
             }
@@ -167,6 +169,25 @@ mod tests {
         let headers = request.headers();
         let auth_header = headers.get("Authorization").unwrap().to_str().unwrap();
         assert!(auth_header.starts_with("Digest"));
+    }
+
+    #[tokio::test]
+    async fn quotes_md5_in_digest_header_for_pharlap_compatibility() {
+        let client = setup_digest_client("http://example.com".to_owned());
+        let method = http::Method::GET;
+        let url = url::Url::parse("http://example.com").unwrap();
+        // add digest manually so we don't make a request at this stage.
+        client.update_auth_context("Digest realm=\"example.com\", qop=\"auth\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", opaque=\"5ccc069c403ebaf9f0171e9517f40e41\"").await.unwrap();
+        let builder = client.agent.request(method.clone(), url.as_str());
+        let builder = client
+            .apply_authentication(builder, &method, &url)
+            .await
+            .unwrap();
+        let request = builder.build().unwrap();
+        let headers = request.headers();
+        let auth_header = headers.get("Authorization").unwrap().to_str().unwrap();
+        assert!(auth_header.contains("algorithm=\"MD5\""));
+
     }
 
     #[tokio::test]
